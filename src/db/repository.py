@@ -107,19 +107,20 @@ async def create_user(
     db: aiosqlite.Connection,
     telegram_id: int,
     username: Optional[str] = None,
+    initial_balance: float = 10.0,
 ) -> User:
-    """Создать нового пользователя."""
+    """Создать нового пользователя с тестовым балансом."""
     now = datetime.utcnow().isoformat()
     cursor = await db.execute(
-        "INSERT INTO users (telegram_id, username, created_at) VALUES (?, ?, ?)",
-        (telegram_id, username, now),
+        "INSERT INTO users (telegram_id, username, balance, created_at) VALUES (?, ?, ?, ?)",
+        (telegram_id, username, initial_balance, now),
     )
     await db.commit()
     return User(
         id=cursor.lastrowid,
         telegram_id=telegram_id,
         username=username,
-        balance=0.0,
+        balance=initial_balance,
         created_at=datetime.fromisoformat(now),
     )
 

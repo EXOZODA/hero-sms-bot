@@ -163,6 +163,16 @@ async def _show_main_menu(
 async def cmd_start(message: Message, state: FSMContext, **kwargs):
     """Обработчик команды /start."""
     await state.clear()
+
+    # Создаём/загружаем пользователя (выдаётся тестовый баланс $10)
+    try:
+        rs = _get_rent_service(kwargs)
+        user_id = kwargs.get("user_id", message.from_user.id)
+        username = kwargs.get("username", message.from_user.username or f"user_{user_id}")
+        await rs.get_or_create_user(user_id, username)
+    except Exception as exc:
+        logger.warning(f"Не удалось создать пользователя: {exc}")
+
     text = Texts.welcome_new()
     await message.answer(text, reply_markup=main_menu_kb())
 
