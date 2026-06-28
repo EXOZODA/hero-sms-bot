@@ -21,6 +21,7 @@ from src.bot.middlewares import (
     UserMiddleware,
 )
 from src.config import Config
+from src.services.middleware import RentServiceMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,9 @@ def create_dispatcher() -> Dispatcher:
     # Подключаем роутер
     dp.include_router(bot_router)
 
-    # Регистрируем middleware
+    # Регистрируем middleware (порядок важен: RentServiceMiddleware первым)
+    dp.message.middleware(RentServiceMiddleware(config))
+    dp.callback_query.middleware(RentServiceMiddleware(config))
     dp.message.middleware(UserMiddleware())
     dp.callback_query.middleware(UserMiddleware())
     dp.message.middleware(RateLimitMiddleware(rate_limit=1.0))
@@ -91,6 +94,15 @@ async def lifespan(app: FastAPI):
         await bot.delete_webhook()
     except Exception as exc:
         logger.warning(f"Ошибка при удалении webhook: {exc}")
+
+    # Закрываем RentService
+    try:
+        # Получаем rent_service из app.state если есть
+        if hasattr(app.state, "rent_service"):
+            await app.state.rent_service.close()
+    except Exception as exc:
+        logger.warning(f"Ошибка при закрытии RentService: {exc}")
+
     await bot.session.close()
 
 
@@ -102,7 +114,6 @@ app = FastAPI(title="HeroSMS Bot", lifespan=lifespan)
 @app.post(config.WEBHOOK_PATH)
 async def webhook(request: Request) -> JSONResponse:
     """Принимает обновления от Telegram через webhook."""
-    # Проверка secret token (защита от поддельных запросов)
     received_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     if config.WEBHOOK_SECRET_TOKEN and received_token != config.WEBHOOK_SECRET_TOKEN:
         logger.warning(f"Webhook rejected: invalid secret token ({received_token})")

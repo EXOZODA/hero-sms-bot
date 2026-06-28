@@ -1,25 +1,32 @@
 """
-Премиальные inline-клавиатуры с эмодзи.
-Все функции возвращают InlineKeyboardMarkup.
+Премиальные inline-клавиатуры с кастомными черно-белыми иконками.
 """
 
-from typing import Optional
+from typing import Optional, Sequence
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from src.bot.icons import (
+    ARROW_L, ARROW_R, CHECK, COIN, CROSS, CROWN, DIAMOND,
+    GLOBE, GRID, HELP, HOME, KEY, LIST, MAIL, MENU, PHONE,
+    PLUS, REFRESH, SEARCH, SEP_THIN, STAR, STATUS_ACTIVE,
+    TOOL, get_service_icon, SEP_DOTS,
+)
+from src.db.models import Rent
+
 # ─── Данные для клавиатур ──────────────────────────────────────────────
 
 SERVICES: list[dict] = [
-    {"code": "tg", "name": "Telegram", "emoji": "🔷"},
-    {"code": "wa", "name": "WhatsApp", "emoji": "💬"},
-    {"code": "ig", "name": "Instagram", "emoji": "📸"},
-    {"code": "go", "name": "Google", "emoji": "▶️"},
-    {"code": "fb", "name": "Facebook", "emoji": "👍"},
-    {"code": "vb", "name": "Viber", "emoji": "📺"},
-    {"code": "ok", "name": "Odnoklassniki", "emoji": "👥"},
-    {"code": "tt", "name": "TikTok", "emoji": "🎵"},
-    {"code": "tw", "name": "Twitter (X)", "emoji": "🐦"},
+    {"code": "tg", "name": "Telegram", "icon": get_service_icon("tg")},
+    {"code": "wa", "name": "WhatsApp", "icon": get_service_icon("wa")},
+    {"code": "ig", "name": "Instagram", "icon": get_service_icon("ig")},
+    {"code": "go", "name": "Google", "icon": get_service_icon("go")},
+    {"code": "fb", "name": "Facebook", "icon": get_service_icon("fb")},
+    {"code": "vb", "name": "Viber", "icon": get_service_icon("vb")},
+    {"code": "ok", "name": "Odnoklassniki", "icon": get_service_icon("ok")},
+    {"code": "tt", "name": "TikTok", "icon": get_service_icon("tt")},
+    {"code": "tw", "name": "Twitter (X)", "icon": get_service_icon("tw")},
 ]
 
 COUNTRIES: list[dict] = [
@@ -48,26 +55,28 @@ ITEMS_PER_PAGE = 6
 
 # ─── Вспомогательные функции ───────────────────────────────────────────
 
-def _build_url_button(text: str, url: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, url=url)
-
-
-def _build_cb_button(text: str, callback_data: str) -> InlineKeyboardButton:
+def _btn(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Создать кнопку с callback_data."""
     return InlineKeyboardButton(text=text, callback_data=callback_data)
 
 
-# ─── Главное меню ──────────────────────────────────────────────────────
+def _url(text: str, url: str) -> InlineKeyboardButton:
+    """Создать кнопку-ссылку."""
+    return InlineKeyboardButton(text=text, url=url)
+
+
+# ─── Главное меню ─────────────────────────────────────────────────────
 
 def main_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        _build_cb_button("📱 Арендовать", "rent"),
-        _build_cb_button("📋 Мои аренды", "my_rents"),
+        _btn(f"{PHONE} Арендовать", "rent"),
+        _btn(f"{LIST} Мои аренды", "my_rents"),
         width=2,
     )
     builder.row(
-        _build_cb_button("💰 Баланс", "balance"),
-        _build_cb_button("❓ Помощь", "help"),
+        _btn(f"{COIN} Баланс", "balance"),
+        _btn(f"{HELP} Помощь", "help"),
         width=2,
     )
     return builder.as_markup()
@@ -75,46 +84,38 @@ def main_menu_kb() -> InlineKeyboardMarkup:
 
 # ─── Выбор сервиса ─────────────────────────────────────────────────────
 
-def service_selection_kb(services: Optional[list[dict]] = None) -> InlineKeyboardMarkup:
-    """Сетка сервисов по 3 в ряд + кнопка 'Другой сервис'."""
-    if services is None:
-        services = SERVICES
-
+def service_selection_kb() -> InlineKeyboardMarkup:
+    """Сетка сервисов по 3 в ряд + ручной ввод."""
     builder = InlineKeyboardBuilder()
 
-    # По 3 сервиса в ряд
-    for i in range(0, len(services), 3):
-        row_services = services[i:i + 3]
+    for i in range(0, len(SERVICES), 3):
+        row = SERVICES[i:i + 3]
         buttons = [
-            _build_cb_button(
-                f"{s['emoji']} {s['name']}",
-                f"service:{s['code']}",
-            )
-            for s in row_services
+            _btn(f"{s['icon']} {s['name']}", f"service:{s['code']}")
+            for s in row
         ]
         builder.row(*buttons, width=3)
 
-    # Кнопка "Другой сервис"
     builder.row(
-        _build_cb_button("🔍 Другой сервис", "other_service"),
-        _build_cb_button("🏠 Главная", "main_menu"),
+        _btn(f"{SEARCH} Другой сервис", "other_service"),
+        _btn(f"{HOME} Главная", "main_menu"),
         width=2,
     )
 
     return builder.as_markup()
 
 
-# ─── Выбор страны ──────────────────────────────────────────────────────
+# ─── Выбор страны ─────────────────────────────────────────────────────
 
 def country_selection_kb(
     countries: Optional[list[dict]] = None,
     page: int = 0,
 ) -> InlineKeyboardMarkup:
-    """Список стран с флагами, по ITEMS_PER_PAGE на страницу + пагинация."""
+    """Список стран с флагами и ценами, постранично."""
     if countries is None:
         countries = COUNTRIES
 
-    total_pages = (len(countries) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+    total_pages = max(1, (len(countries) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
     page = max(0, min(page, total_pages - 1))
 
     start = page * ITEMS_PER_PAGE
@@ -123,12 +124,11 @@ def country_selection_kb(
 
     builder = InlineKeyboardBuilder()
 
-    # Кнопки стран: флаг + название + цена
     for c in page_countries:
         price_str = f"${c['price_activation']:.2f}"
         builder.row(
-            _build_cb_button(
-                f"{c['flag']} {c['name']} — {price_str}",
+            _btn(
+                f"{c['flag']} {c['name']}  {COIN} {price_str}",
                 f"country:{c['id']}",
             ),
             width=1,
@@ -137,27 +137,18 @@ def country_selection_kb(
     # Пагинация
     nav_buttons = []
     if page > 0:
-        nav_buttons.append(
-            _build_cb_button("◀️", f"country_page:{page - 1}")
-        )
+        nav_buttons.append(_btn(f"{ARROW_L}", f"country_page:{page - 1}"))
+
+    nav_buttons.append(_btn(f"{page + 1}/{total_pages}", "noop"))
+
     if page < total_pages - 1:
-        nav_buttons.append(
-            _build_cb_button("▶️", f"country_page:{page + 1}")
-        )
+        nav_buttons.append(_btn(f"{ARROW_R}", f"country_page:{page + 1}"))
 
-    if nav_buttons:
-        # Добавляем индикатор страницы
-        page_indicator = f"📄 {page + 1}/{total_pages}"
-        builder.row(
-            _build_cb_button(page_indicator, "noop"),
-            *nav_buttons,
-            width=1 + len(nav_buttons),
-        )
+    builder.row(*nav_buttons, width=len(nav_buttons))
 
-    # Навигация назад
     builder.row(
-        _build_cb_button("🔙 Назад", "back"),
-        _build_cb_button("🏠 Главная", "main_menu"),
+        _btn(f"{ARROW_L} Назад", "back"),
+        _btn(f"{HOME} Главная", "main_menu"),
         width=2,
     )
 
@@ -169,16 +160,16 @@ def country_selection_kb(
 def rent_type_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        _build_cb_button("🎯 Активация (20 мин)", "rent_type:activation"),
+        _btn(f"{PHONE} Активация (20 мин)", "rent_type:activation"),
         width=1,
     )
     builder.row(
-        _build_cb_button("📦 Аренда (от 4 часов)", "rent_type:rent"),
+        _btn(f"{STAR} Аренда (от 4 часов)", "rent_type:rent"),
         width=1,
     )
     builder.row(
-        _build_cb_button("🔙 Назад", "back"),
-        _build_cb_button("🏠 Главная", "main_menu"),
+        _btn(f"{ARROW_L} Назад", "back"),
+        _btn(f"{HOME} Главная", "main_menu"),
         width=2,
     )
     return builder.as_markup()
@@ -187,33 +178,26 @@ def rent_type_kb() -> InlineKeyboardMarkup:
 # ─── Выбор длительности ────────────────────────────────────────────────
 
 def duration_selection_kb() -> InlineKeyboardMarkup:
-    """
-    Клавиатура выбора длительности аренды.
-    Цены рассчитываются на основе базовой цены за час.
-    """
+    """Клавиатура выбора длительности."""
     durations = [
-        (4, "⏱ 4 часа"),
-        (12, "⏱ 12 часов"),
-        (24, "⏱ 24 часа"),
-        (72, "⏱ 3 дня"),
-        (168, "⏱ 7 дней"),
-        (336, "⏱ 14 дней"),
+        (4, f"{CLOCK} 4 часа"),
+        (12, f"{CLOCK} 12 часов"),
+        (24, f"{CLOCK} 24 часа"),
+        (72, f"{CLOCK} 3 дня"),
+        (168, f"{CLOCK} 7 дней"),
+        (336, f"{CLOCK} 14 дней"),
     ]
 
     builder = InlineKeyboardBuilder()
 
-    # По 2 в ряд
     for i in range(0, len(durations), 2):
         row = durations[i:i + 2]
-        buttons = [
-            _build_cb_button(label, f"duration:{hours}")
-            for hours, label in row
-        ]
+        buttons = [_btn(label, f"duration:{hours}") for hours, label in row]
         builder.row(*buttons, width=2)
 
     builder.row(
-        _build_cb_button("🔙 Назад", "back"),
-        _build_cb_button("🏠 Главная", "main_menu"),
+        _btn(f"{ARROW_L} Назад", "back"),
+        _btn(f"{HOME} Главная", "main_menu"),
         width=2,
     )
 
@@ -225,12 +209,12 @@ def duration_selection_kb() -> InlineKeyboardMarkup:
 def confirm_kb(price: float) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        _build_cb_button(f"✅ Подтвердить ${price:.2f}", "confirm_rent"),
+        _btn(f"{CHECK} Подтвердить ${price:.2f}", "confirm_rent"),
         width=1,
     )
     builder.row(
-        _build_cb_button("🔙 Назад", "back"),
-        _build_cb_button("🏠 Главная", "main_menu"),
+        _btn(f"{ARROW_L} Назад", "back"),
+        _btn(f"{HOME} Главная", "main_menu"),
         width=2,
     )
     return builder.as_markup()
@@ -241,17 +225,17 @@ def confirm_kb(price: float) -> InlineKeyboardMarkup:
 def rent_control_kb(rent_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        _build_cb_button("📩 SMS", f"get_sms:{rent_id}"),
-        _build_cb_button("🔄 Продлить", f"extend_rent:{rent_id}"),
+        _btn(f"{MAIL} SMS", f"get_sms:{rent_id}"),
+        _btn(f"{REFRESH} Продлить", f"extend_rent:{rent_id}"),
         width=2,
     )
     builder.row(
-        _build_cb_button("❌ Отменить", f"cancel_rent:{rent_id}"),
-        _build_cb_button("🔙 Назад", "my_rents"),
+        _btn(f"{CROSS} Отменить", f"cancel_rent:{rent_id}"),
+        _btn(f"{LIST} К списку", "my_rents"),
         width=2,
     )
     builder.row(
-        _build_cb_button("🏠 Главная", "main_menu"),
+        _btn(f"{HOME} Главная", "main_menu"),
         width=1,
     )
     return builder.as_markup()
@@ -262,12 +246,12 @@ def rent_control_kb(rent_id: int) -> InlineKeyboardMarkup:
 def balance_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        _build_cb_button("💳 Пополнить", "topup"),
-        _build_cb_button("🔄 Обновить", "balance"),
+        _btn(f"{PLUS} Пополнить", "topup"),
+        _btn(f"{REFRESH} Обновить", "balance"),
         width=2,
     )
     builder.row(
-        _build_cb_button("🏠 Главная", "main_menu"),
+        _btn(f"{HOME} Главная", "main_menu"),
         width=1,
     )
     return builder.as_markup()
@@ -275,22 +259,23 @@ def balance_kb() -> InlineKeyboardMarkup:
 
 # ─── Список моих аренд ─────────────────────────────────────────────────
 
-def my_rents_kb(rents: list[dict]) -> InlineKeyboardMarkup:
-    """Клавиатура со списком активных аренд пользователя."""
+def my_rents_kb(rents: Sequence) -> InlineKeyboardMarkup:
+    """Клавиатура со списком аренд пользователя."""
     builder = InlineKeyboardBuilder()
 
     for rent in rents:
-        emoji = "📱"
+        phone = getattr(rent, 'phone', '—')
+        s_name = getattr(rent, 'service_name', '—')
         builder.row(
-            _build_cb_button(
-                f"{emoji} #{rent['id']} {rent['phone']} — {rent['service_name']}",
-                f"rent_detail:{rent['id']}",
+            _btn(
+                f"{PHONE} #{rent.id} {phone}  {s_name}",
+                f"rent_detail:{rent.id}",
             ),
             width=1,
         )
 
     builder.row(
-        _build_cb_button("🏠 Главная", "main_menu"),
+        _btn(f"{HOME} Главная", "main_menu"),
         width=1,
     )
 
@@ -301,75 +286,56 @@ def my_rents_kb(rents: list[dict]) -> InlineKeyboardMarkup:
 
 def back_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(
-        _build_cb_button("🔙 Назад", "back"),
-        width=1,
-    )
+    builder.row(_btn(f"{ARROW_L} Назад", "back"), width=1)
     return builder.as_markup()
 
 
 def cancel_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        _build_cb_button("❌ Отмена", "cancel"),
+        _btn(f"{CROSS} Отмена", "cancel"),
         width=1,
-    )
-    return builder.as_markup()
-
-
-def yes_no_kb() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        _build_cb_button("✅ Да", "yes"),
-        _build_cb_button("❌ Нет", "no"),
-        width=2,
     )
     return builder.as_markup()
 
 
 def back_main_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(
-        _build_cb_button("🏠 Главное меню", "main_menu"),
-        width=1,
-    )
+    builder.row(_btn(f"{HOME} Главное меню", "main_menu"), width=1)
     return builder.as_markup()
 
 
 def topup_kb() -> InlineKeyboardMarkup:
-    """Клавиатура с быстрыми суммами для пополнения."""
+    """Клавиатура с быстрыми суммами пополнения."""
     builder = InlineKeyboardBuilder()
     builder.row(
-        _build_cb_button("💵 $5", "topup_amount:5"),
-        _build_cb_button("💵 $10", "topup_amount:10"),
-        _build_cb_button("💵 $25", "topup_amount:25"),
-        _build_cb_button("💵 $50", "topup_amount:50"),
+        _btn(f"$5", "topup_amount:5"),
+        _btn(f"$10", "topup_amount:10"),
+        _btn(f"$25", "topup_amount:25"),
+        _btn(f"$50", "topup_amount:50"),
         width=4,
     )
-    builder.row(
-        _build_cb_button("❌ Отмена", "main_menu"),
-        width=1,
-    )
+    builder.row(_btn(f"{CROSS} Отмена", "main_menu"), width=1)
     return builder.as_markup()
 
 
-def extend_duration_kb(current_rent_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура для продления аренды с выбором срока."""
+def extend_duration_kb(rent_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура продления с выбором срока."""
     builder = InlineKeyboardBuilder()
     builder.row(
-        _build_cb_button("⏱ +4 часа", f"extend_confirm:{current_rent_id}:4"),
-        _build_cb_button("⏱ +12 часов", f"extend_confirm:{current_rent_id}:12"),
-        _build_cb_button("⏱ +24 часа", f"extend_confirm:{current_rent_id}:24"),
+        _btn(f"{CLOCK} +4 ч", f"extend_confirm:{rent_id}:4"),
+        _btn(f"{CLOCK} +12 ч", f"extend_confirm:{rent_id}:12"),
+        _btn(f"{CLOCK} +24 ч", f"extend_confirm:{rent_id}:24"),
+        width=3,
+    )
+    builder.row(
+        _btn(f"{CLOCK} +3 д", f"extend_confirm:{rent_id}:72"),
+        _btn(f"{CLOCK} +7 д", f"extend_confirm:{rent_id}:168"),
         width=2,
     )
     builder.row(
-        _build_cb_button("⏱ +3 дня", f"extend_confirm:{current_rent_id}:72"),
-        _build_cb_button("⏱ +7 дней", f"extend_confirm:{current_rent_id}:168"),
-        width=2,
-    )
-    builder.row(
-        _build_cb_button("🔙 Назад", f"rent_detail:{current_rent_id}"),
-        _build_cb_button("🏠 Главная", "main_menu"),
+        _btn(f"{ARROW_L} Назад", f"rent_detail:{rent_id}"),
+        _btn(f"{HOME} Главная", "main_menu"),
         width=2,
     )
     return builder.as_markup()
