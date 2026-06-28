@@ -90,15 +90,16 @@ class RentService:
         description: str = "Пополнение баланса",
     ) -> float:
         """Пополнить баланс пользователя."""
+        # Важно: сначала гарантируем, что пользователь существует в БД
+        user = await get_or_create_user(self.db, telegram_id, f"user_{telegram_id}")
+        # Теперь добавляем баланс
         new_balance = await add_user_balance(self.db, telegram_id, amount)
-        user = await get_user_by_telegram_id(self.db, telegram_id)
-        if user:
-            await create_transaction(self.db, Transaction(
-                user_id=user.id,
-                amount=amount,
-                type="deposit",
-                description=description,
-            ))
+        await create_transaction(self.db, Transaction(
+            user_id=user.id,
+            amount=amount,
+            type="deposit",
+            description=description,
+        ))
         return new_balance
 
     # ─── Аренда ──────────────────────────────────────────────────────
