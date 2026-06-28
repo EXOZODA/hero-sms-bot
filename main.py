@@ -1,10 +1,11 @@
 """
-Точка входа в бота. Webhook режим для деплоя на Render/Vercel/etc.
+Точка входа в бота. Webhook режим для деплоя на Render.
 Поддерживает также polling-режим для локальной разработки.
 """
 
 import logging
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # Добавляем корень проекта в sys.path для корректного импорта
@@ -14,6 +15,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import Update
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -42,35 +44,41 @@ if not config.BOT_TOKEN:
     logger.error("BOT_TOKEN не указан! Проверьте .env файл.")
     sys.exit(1)
 
-# ─── Инициализация бота ────────────────────────────────────────────────
+
+# ─── Создаём бота и диспетчер (глобально, но без include_router) ──────
+
+def create_dispatcher() -> Dispatcher:
+    """Создаёт и настраивает Dispatcher."""
+    storage = MemoryStorage()
+    dp = Dispatcher(storage=storage)
+
+    # Подключаем роутер
+    dp.include_router(bot_router)
+
+    # Регистрируем middleware
+    dp.message.middleware(UserMiddleware())
+    dp.callback_query.middleware(UserMiddleware())
+    dp.message.middleware(RateLimitMiddleware(rate_limit=1.0))
+    dp.callback_query.middleware(RateLimitMiddleware(rate_limit=1.0))
+    dp.message.middleware(ErrorHandlingMiddleware())
+    dp.callback_query.middleware(ErrorHandlingMiddleware())
+
+    return dp
+
 
 bot = Bot(
     token=config.BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
-
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
-
-# Подключаем роутер
-dp.include_router(bot_router)
-
-# Регистрируем middleware
-dp.message.middleware(UserMiddleware())
-dp.callback_query.middleware(UserMiddleware())
-dp.message.middleware(RateLimitMiddleware(rate_limit=1.0))
-dp.callback_query.middleware(RateLimitMiddleware(rate_limit=1.0))
-dp.message.middleware(ErrorHandlingMiddleware())
-dp.callback_query.middleware(ErrorHandlingMiddleware())
-
-# ─── FastAPI приложение (Webhook) ──────────────────────────────────────
-
-app = FastAPI(title="HeroSMS Bot")
+dp = create_dispatcher()
 
 
-@app.on_event("startup")
-async def on_startup():
-    """Устанавливает webhook при запуске."""
+# ─── Lifespan (замена on_event) ────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Управляет жизненным циклом приложения."""
+    # Startup
     webhook_url = config.webhook_full_url
     logger.info(f"Устанавливаю webhook: {webhook_url}")
 
@@ -90,10 +98,9 @@ async def on_startup():
         logger.error(f"Не удалось установить webhook: {exc}")
         raise
 
+    yield  # Приложение работает
 
-@app.on_event("shutdown")
-async def on_shutdown():
-    """Удаляет webhook при остановке."""
+    # Shutdown
     logger.info("Удаляю webhook...")
     try:
         await bot.delete_webhook()
@@ -102,11 +109,14 @@ async def on_shutdown():
     await bot.session.close()
 
 
+# ─── FastAPI приложение (Webhook) ──────────────────────────────────────
+
+app = FastAPI(title="HeroSMS Bot", lifespan=lifespan)
+
+
 @app.post(config.WEBHOOK_PATH)
 async def webhook(request: Request) -> JSONResponse:
     """Принимает обновления от Telegram через webhook."""
-    from aiogram.types import Update
-
     # Проверка secret token (защита от поддельных запросов)
     received_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     if config.WEBHOOK_SECRET_TOKEN and received_token != config.WEBHOOK_SECRET_TOKEN:
@@ -159,10 +169,10 @@ if __name__ == "__main__":
 
     # Проверяем аргументы командной строки
     if "--polling" in sys.argv or "-p" in sys.argv:
-        # Polling режим
+        # Polling режим (локально)
         asyncio.run(start_polling())
     else:
-        # Webhook режим (по умолчанию)
+        # Webhook режим (продакшн на Render)
         import uvicorn
 
         logger.info(f"Запуск webhook сервера на {config.WEBAPP_HOST}:{config.WEBAPP_PORT}")
@@ -170,6 +180,6 @@ if __name__ == "__main__":
             "main:app",
             host=config.WEBAPP_HOST,
             port=config.WEBAPP_PORT,
-            reload=True if "--reload" in sys.argv else False,
+            reload=False,  # Без reload для стабильности
             log_level="info",
         )
